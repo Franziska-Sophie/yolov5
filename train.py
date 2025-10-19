@@ -25,6 +25,10 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import warnings
+
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 try:
     import comet_ml  # must be imported before torch (if installed)
 except ImportError:
@@ -95,6 +99,7 @@ from utils.torch_utils import (
     smart_resume,
     torch_distributed_zero_first,
 )
+from utils.video_dataloader import create_video_yolo_dataloader
 
 LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv("RANK", -1))
@@ -152,6 +157,10 @@ def train(hyp, opt, device, callbacks):
         opt.freeze,
     )
     callbacks.run("on_pretrain_routine_start")
+
+    train_videos = Path(os.path.dirname(os.path.dirname(opt.data))) / "cabin_footage/training_data"
+    train_labels = Path(os.path.dirname(os.path.dirname(opt.data))) / "annotations" / "yolo_train"
+    val_labels = Path(os.path.dirname(os.path.dirname(opt.data))) / "annotations" / "yolo_val"
 
     # Directories
     w = save_dir / "weights"  # weights dir
@@ -284,44 +293,62 @@ def train(hyp, opt, device, callbacks):
         LOGGER.info("Using SyncBatchNorm()")
 
     # Trainloader
-    train_loader, dataset = create_dataloader(
-        train_path,
-        imgsz,
-        batch_size // WORLD_SIZE,
-        gs,
-        single_cls,
-        hyp=hyp,
-        augment=True,
-        cache=None if opt.cache == "val" else opt.cache,
-        rect=opt.rect,
-        rank=LOCAL_RANK,
+    # train_loader, dataset = create_dataloader(
+    #     train_path,
+    #     imgsz,
+    #     batch_size // WORLD_SIZE,
+    #     gs,
+    #     single_cls,
+    #     hyp=hyp,
+    #     augment=True,
+    #     cache=None if opt.cache == "val" else opt.cache,
+    #     rect=opt.rect,
+    #     rank=LOCAL_RANK,
+    #     workers=workers,
+    #     image_weights=opt.image_weights,
+    #     quad=opt.quad,
+    #     prefix=colorstr("train: "),
+    #     shuffle=True,
+    #     seed=opt.seed,
+    # )
+    train_loader = create_video_yolo_dataloader(
+        video_root=train_videos,
+        label_root=train_labels,
+        imgsz=imgsz,
+        batch_size=batch_size // WORLD_SIZE,
         workers=workers,
-        image_weights=opt.image_weights,
-        quad=opt.quad,
-        prefix=colorstr("train: "),
         shuffle=True,
-        seed=opt.seed,
     )
-    labels = np.concatenate(dataset.labels, 0)
-    mlc = int(labels[:, 0].max())  # max label class
+    dataset = train_loader.dataset
+    nc = len(open(train_labels / "classes.txt").read().splitlines())
+    labels = np.zeros((1, 1))  # np.concatenate(dataset.labels, 0)
+    mlc = nc - 1  # int(labels[:, 0].max())  # max label class
     assert mlc < nc, f"Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}"
 
     # Process 0
     if RANK in {-1, 0}:
-        val_loader = create_dataloader(
-            val_path,
-            imgsz,
-            batch_size // WORLD_SIZE * 2,
-            gs,
-            single_cls,
-            hyp=hyp,
-            cache=None if noval else opt.cache,
-            rect=True,
-            rank=-1,
+        # val_loader = create_dataloader(
+        #     val_path,
+        #     imgsz,
+        #     batch_size // WORLD_SIZE * 2,
+        #     gs,
+        #     single_cls,
+        #     hyp=hyp,
+        #     cache=None if noval else opt.cache,
+        #     rect=True,
+        #     rank=-1,
+        #     workers=workers * 2,
+        #     pad=0.5,
+        #     prefix=colorstr("val: "),
+        # )[0]
+        val_loader = create_video_yolo_dataloader(
+            video_root=train_videos,
+            label_root=val_labels,
+            imgsz=imgsz,
+            batch_size=batch_size // WORLD_SIZE * 2,
             workers=workers * 2,
-            pad=0.5,
-            prefix=colorstr("val: "),
-        )[0]
+            shuffle=False,
+        )
 
         if not resume:
             if not opt.noautoanchor:
