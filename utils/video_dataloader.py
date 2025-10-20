@@ -3,8 +3,10 @@ import cv2
 import random
 import torch
 from torch.utils.data import Dataset, DataLoader
+from utils.dataloaders import SmartDistributedSampler
 from pathlib import Path
 import numpy as np
+from utils.torch_utils import torch_distributed_zero_first
 
 
 class VideoYOLODataset(Dataset):
@@ -158,19 +160,23 @@ def create_video_yolo_dataloader(
     frame_skip=1,
     sample_frames=None,
     shuffle=True,
+    rank=-1,
 ):
-    dataset = VideoYOLODataset(
-        video_root=video_root,
-        label_root=label_root,
-        img_size=imgsz,
-        frame_skip=frame_skip,
-        sample_frames=sample_frames,
-    )
+    with torch_distributed_zero_first(rank):
+        dataset = VideoYOLODataset(
+            video_root=video_root,
+            label_root=label_root,
+            img_size=imgsz,
+            frame_skip=frame_skip,
+            sample_frames=sample_frames,
+        )
+    sampler = None if rank == -1 else SmartDistributedSampler(dataset, shuffle=shuffle)
     return DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
+        shuffle=shuffle and sampler is None,
         num_workers=workers,
         pin_memory=True,
+        sampler=sampler,
         collate_fn=yolo_video_collate,
     )

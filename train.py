@@ -318,6 +318,7 @@ def train(hyp, opt, device, callbacks):
         batch_size=batch_size // WORLD_SIZE,
         workers=workers,
         shuffle=True,
+        rank=LOCAL_RANK,
     )
     dataset = train_loader.dataset
     nc = len(open(train_labels / "classes.txt").read().splitlines())
