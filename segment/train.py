@@ -294,8 +294,8 @@ def train(hyp, opt, device, callbacks):
                 check_anchors(dataset, model=model, thr=hyp["anchor_t"], imgsz=imgsz)  # run AutoAnchor
             model.half().float()  # pre-reduce anchor precision
 
-            if plots:
-                plot_labels(labels, names, save_dir)
+            # if plots:
+            #     plot_labels(labels, names, save_dir)
         # callbacks.run('on_pretrain_routine_end', labels, names)
 
     # DDP mode

@@ -26,6 +26,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import warnings
+import multiprocessing as mp
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -319,6 +320,8 @@ def train(hyp, opt, device, callbacks):
         workers=workers,
         shuffle=True,
         rank=LOCAL_RANK,
+        frame_skip=10,
+        cache_images="ram",
     )
     dataset = train_loader.dataset
     nc = len(open(train_labels / "classes.txt").read().splitlines())
@@ -349,6 +352,8 @@ def train(hyp, opt, device, callbacks):
             batch_size=batch_size // WORLD_SIZE * 2,
             workers=workers * 2,
             shuffle=False,
+            frame_skip=10,
+            cache_images="ram",
         )
 
         if not resume:
@@ -662,6 +667,11 @@ def main(opt, callbacks=Callbacks()):
         For detailed usage, refer to:
         https://github.com/ultralytics/yolov5/tree/master/models
     """
+    try:
+        mp.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
+
     if RANK in {-1, 0}:
         print_args(vars(opt))
         check_git_status()
